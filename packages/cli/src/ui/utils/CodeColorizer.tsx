@@ -108,7 +108,7 @@ function highlightAndRenderLine(
     const renderedNode = renderHastNode(getHighlightedLine(), theme, undefined);
 
     return renderedNode !== null ? renderedNode : strippedLine;
-  } catch {
+  } catch (_error) {
     return stripAnsi(line);
   }
 }
@@ -136,7 +136,7 @@ export interface ColorizeCodeOptions {
   hideLineNumbers?: boolean;
   disableColor?: boolean;
   returnLines?: boolean;
-  paddingX?: number;
+  onOverflowChange?: (isOverflowing: boolean) => void;
 }
 
 /**
@@ -161,7 +161,7 @@ export function colorizeCode({
   hideLineNumbers = false,
   disableColor = false,
   returnLines = false,
-  paddingX = 0,
+  onOverflowChange,
 }: ColorizeCodeOptions): React.ReactNode | React.ReactNode[] {
   const codeToHighlight = code.replace(/\n$/, '');
   const activeTheme = theme || themeManager.getActiveTheme();
@@ -169,29 +169,26 @@ export function colorizeCode({
     ? false
     : settings.merged.ui.showLineNumbers;
 
-  // We force MaxSizedBox if availableHeight is provided, even if alternate buffer is enabled,
-  // because this might be rendered in a constrained UI box (like tool confirmation).
-  const useMaxSizedBox =
-    (!settings.merged.ui.useAlternateBuffer || availableHeight !== undefined) &&
-    !returnLines;
-
-  let hiddenLinesCount = 0;
-  let finalLines = codeToHighlight.split(/\r?\n/);
-
+  const useMaxSizedBox = !settings.merged.ui.useAlternateBuffer && !returnLines;
   try {
+    // Render the HAST tree using the adapted theme
+    // Apply the theme's default foreground color to the top-level Text element
+    let lines = codeToHighlight.split(/\r?\n/);
+    const padWidth = String(lines.length).length; // Calculate padding width based on number of lines
+
+    let hiddenLinesCount = 0;
+
     // Optimization to avoid highlighting lines that cannot possibly be displayed.
     if (availableHeight !== undefined && useMaxSizedBox) {
       availableHeight = Math.max(availableHeight, MINIMUM_MAX_HEIGHT);
-      if (finalLines.length > availableHeight) {
-        const sliceIndex = finalLines.length - availableHeight;
+      if (lines.length > availableHeight) {
+        const sliceIndex = lines.length - availableHeight;
         hiddenLinesCount = sliceIndex;
-        finalLines = finalLines.slice(sliceIndex);
+        lines = lines.slice(sliceIndex);
       }
     }
 
-    const padWidth = String(finalLines.length + hiddenLinesCount).length;
-
-    const renderedLines = finalLines.map((line, index) => {
+    const renderedLines = lines.map((line, index) => {
       const contentToRender = disableColor
         ? line
         : highlightAndRenderLine(line, language, activeTheme);
@@ -228,11 +225,11 @@ export function colorizeCode({
     if (useMaxSizedBox) {
       return (
         <MaxSizedBox
-          paddingX={paddingX}
           maxHeight={availableHeight}
           maxWidth={maxWidth}
           additionalHiddenLinesCount={hiddenLinesCount}
           overflowDirection="top"
+          onOverflowChange={onOverflowChange}
         >
           {renderedLines}
         </MaxSizedBox>
@@ -250,8 +247,10 @@ export function colorizeCode({
       error,
     );
     // Fall back to plain text with default color on error
-    const padWidth = String(finalLines.length + hiddenLinesCount).length;
-    const fallbackLines = finalLines.map((line, index) => (
+    // Also display line numbers in fallback
+    const lines = codeToHighlight.split(/\r?\n/);
+    const padWidth = String(lines.length).length; // Calculate padding width based on number of lines
+    const fallbackLines = lines.map((line, index) => (
       <Box key={index} minHeight={1}>
         {showLineNumbers && (
           <Box
@@ -262,7 +261,7 @@ export function colorizeCode({
             justifyContent="flex-end"
           >
             <Text color={disableColor ? undefined : activeTheme.defaultColor}>
-              {`${index + 1 + hiddenLinesCount}`}
+              {`${index + 1}`}
             </Text>
           </Box>
         )}
@@ -279,11 +278,10 @@ export function colorizeCode({
     if (useMaxSizedBox) {
       return (
         <MaxSizedBox
-          paddingX={paddingX}
           maxHeight={availableHeight}
           maxWidth={maxWidth}
-          additionalHiddenLinesCount={hiddenLinesCount}
           overflowDirection="top"
+          onOverflowChange={onOverflowChange}
         >
           {fallbackLines}
         </MaxSizedBox>
